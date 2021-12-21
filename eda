@@ -1,0 +1,159 @@
+#################################################################################################################
+###Profiler
+#################################################################################################################
+
+library(dplyr)
+library(plyr)
+library(readr)
+library(xtable)
+library(readxl)
+library(taRifx)
+library(lattice)
+library(sqldf)
+library(DT)
+library(writexl)
+library(openxlsx)
+library('scales')
+library(lattice)
+library(reshape2)
+library(ggplot2)
+library(viridis)
+library(stringr)
+library(tibble)
+
+rm(list=ls())
+
+##enter input folder here with xlsx files and sheets with name as Sheet 1
+#fold <- '/Users/kishalaygangopadhyay/Documents/Operations/R/Data/input/HubSpot/Archive/test'
+fold <- '/Users/kishalaygangopadhyay/Documents/Operations/R/Data/input/Profiler'
+delimiter <- ","
+extension <- ".csv"
+##Config parameters 
+## Number of results per attribute 
+top_results <- 10
+#top_results <- paste(top_results,"L",sep="")
+## Number of results for attribute size 
+attribresults <- 100
+
+
+datetime <- Sys.time()
+
+
+### Copy files from refresh location to archive. Remove the files from the Refresh location after copy. 
+
+# remove the report directory
+unlink(paste(fold,"/report",substr(datetime,1,10),'-',substr(datetime,12,13),'-',substr(datetime,15,16),'-',substr(datetime,18,19),sep=""), recursive = T)
+# create the report directory
+dir.create(paste(fold,"/report",substr(datetime,1,10),'-',substr(datetime,12,13),'-',substr(datetime,15,16),'-',substr(datetime,18,19),sep="")) 
+
+
+# get all files in the directories, recursively
+fr <- as.data.frame(list.files(fold, all.files = FALSE, pattern = extension, full.names = T, recursive = F))
+fr1 <- as.data.frame(list.files(fold, include.dirs = F, pattern = extension,full.names = F, recursive = F))
+names(fr) <- "name"
+names(fr1) <- "name1"
+fr2 <- cbind(fr,fr1)
+fr2 <- filter(fr2,fr2$name1!="zip")
+fr2$name1 <- as.character(fr2$name1)
+
+
+# filename <- "c0.csv"
+# p <- read.csv("/Users/kishalaygangopadhyay/Documents/Operations/R/Data/input/HubSpot/companies/c0.csv")
+for(j in 1:nrow(fr2))
+{
+filename <- fr2$name1[j]
+p <- read_delim(paste(fold,"/",fr2$name1[j],sep=""),delim=paste(",delimiter,",sep=""),locale = locale(encoding = "UTF-8"))
+
+##need end result to be column - count of entries, number of nulls, number of unique values, min,max,average 
+f <- as.data.frame(c(0))
+names(f) <- "Attribute"
+f <- add_column(f, CountRecordsNotNull=0 , .after = "Attribute")
+f <- add_column(f, CountNulls=0 , .after = "CountRecordsNotNull")
+f <- add_column(f, CountUnique=0 , .after = "CountNulls")
+f <- add_column(f, MinValue=0 , .after = "CountUnique")
+f <- add_column(f, MaxValue=0 , .after = "MinValue")
+#f <- add_column(f, Top10="" , .after = "MaxValue")
+
+f$Attribute<- names(p)[1]
+f$CountRecordsNotNull <- sum(!is.na(p[,1]))
+f$CountNulls <- sum(is.na(p[,1]))
+f$CountUnique <- sum(count(unique(p[,1]))$freq)
+temp1 <- unlist((p[,1]))
+temp1 <- (as.character(temp1))
+f$MinValue <- min(temp1,na.rm = TRUE)
+f$MaxValue <- max(temp1,na.rm = TRUE)
+
+##Calculate top 10 values 
+frank <- (as.data.frame(count(p[,1])))
+
+frank <- head(frank[order(-frank$freq),],top_results)
+frank1 <- list(paste(frank[,1],"(",frank$freq,")",sep=""),collapse = " ")
+f$ByFrequency <- (paste(frank1, collapse = " "))
+
+##Calculate attributes with 1-10 characters and their counts 
+
+attrsize <- data.frame(names=p[,1],chr=apply(p[,1],2,nchar))
+names(attrsize) <- c("col1","count1")
+attrsize <- fn$sqldf("select count1,count(*) as freq from attrsize 
+                     where count1 <= '$attribresults' 
+                     group by 1 order by 1 asc")
+a1 <- list(paste(attrsize[,1],"(",attrsize$freq,")",sep=""),collapse = " ")
+f$ByAttributeLength <- (paste(a1, collapse = " "))
+
+
+
+
+for(i in 1:top_results)
+{
+frank <- (as.data.frame(count(p[,1])))
+frank <- head(frank[order(-frank$freq),],top_results)
+frank1 <- list(paste(frank[,1],"(",frank$freq,")",sep=""),collapse = " ")
+f$ByFrequency <- (paste(frank1, collapse = " "))
+}
+
+
+f1<- f
+
+for(i in 2:ncol(p))
+{
+  f$Attribute<- names(p)[i]
+  print(f$Attribute)
+  f$CountRecordsNotNull <- sum(!is.na(p[,i]))
+  f$CountNulls <- sum(is.na(p[,i]))
+  f$CountUnique <- sum(count(unique(p[,i]))$freq)
+  temp1 <- unlist((p[,i]))
+  temp1 <- (as.character(temp1))
+  f$MinValue <- min(temp1,na.rm = TRUE)
+  f$MaxValue <- max(temp1,na.rm = TRUE)
+  
+  frank <- (as.data.frame(count(p[,i])))
+  frank <- head(frank[order(-frank$freq),],10L)
+  frank1 <- list(paste(frank[,1],"(",frank$freq,")",sep=""),collapse = " ")
+  f$ByFrequency <- paste(frank1, collapse = " ")
+
+  attrsize <- data.frame(names=p[,i],chr=apply(p[,i],2,nchar))
+  names(attrsize) <- c("col1","count1")
+  attrsize <- fn$sqldf("select count1,count(*) as freq from attrsize 
+                   where count1 <= '$attribresults' 
+                   group by 1 order by 1 asc")
+  a1 <- list(paste(attrsize[,1],"(",attrsize$freq,")",sep=""),collapse = " ")
+  f$ByAttributeLength <- (paste(a1, collapse = " "))
+
+  f1 <- rbind(f1,f)
+  rm(frank,frank1,attrsize)
+}
+
+rm(f,p)
+
+filename <- unlist(str_split(filename,"\\."))[1]
+
+
+OUT <- createWorkbook()
+
+addWorksheet(OUT, paste("PF_",substr(filename,1,20),j,sep=""))
+
+writeData(OUT, sheet = paste("PF_",substr(filename,1,20),j,sep=""), x = f1)
+saveWorkbook(OUT, paste(fold,"/report",substr(datetime,1,10),'-',substr(datetime,12,13),'-',substr(datetime,15,16),'-',substr(datetime,18,19)
+                        ,"/",filename,"_Profile_",substr(datetime,1,10),'-',substr(datetime,12,13),'-',substr(datetime,15,16),'-',substr(datetime,18,19),j,'.xlsx',sep=""), overwrite = TRUE)  
+
+}
